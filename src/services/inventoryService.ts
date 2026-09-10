@@ -1,9 +1,13 @@
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { getConfig, listInventory, updateConfig } from "../db";
 
-const FIELDS_PER_EMBED = 25;
+const MAX_DESCRIPTION_CHARS = 3500;
 const MAX_EMBEDS_PER_MESSAGE = 10;
-const MAX_ITEMS = FIELDS_PER_EMBED * MAX_EMBEDS_PER_MESSAGE;
+
+function formatLine(it: { name: string; quantity: number; reserved: number }) {
+  const reservedPart = it.reserved > 0 ? ` (${it.reserved} in poll)` : "";
+  return `🔹 **${it.name}** — ${it.quantity} disponibili${reservedPart}`;
+}
 
 export async function refreshInventory(client: Client, guildId: string) {
   const cfg = getConfig(guildId);
@@ -22,30 +26,30 @@ export async function refreshInventory(client: Client, guildId: string) {
         .setColor(0x1abc9c),
     ];
   } else {
-    const shown = items.slice(0, MAX_ITEMS);
-    const chunks: (typeof shown)[] = [];
-    for (let i = 0; i < shown.length; i += FIELDS_PER_EMBED) {
-      chunks.push(shown.slice(i, i + FIELDS_PER_EMBED));
+    // Impacchetta le righe in blocchi di testo sotto il limite di caratteri di una
+    // description, poi un embed per blocco (quasi sempre uno solo basta).
+    const chunks: string[] = [];
+    let current = "";
+    for (const it of items) {
+      const line = formatLine(it);
+      if (current && current.length + 1 + line.length > MAX_DESCRIPTION_CHARS) {
+        chunks.push(current);
+        current = line;
+      } else {
+        current = current ? `${current}\n${line}` : line;
+      }
     }
+    if (current) chunks.push(current);
 
-    embeds = chunks.map((chunk, idx) => {
-      const embed = new EmbedBuilder().setColor(0x1abc9c);
+    const shownChunks = chunks.slice(0, MAX_EMBEDS_PER_MESSAGE);
+    embeds = shownChunks.map((description, idx) => {
+      const embed = new EmbedBuilder().setColor(0x1abc9c).setDescription(description);
       if (idx === 0) embed.setTitle("📦 Inventario di gilda");
-      embed.addFields(
-        chunk.map((it) => {
-          const reservedPart = it.reserved > 0 ? ` (${it.reserved} in poll)` : "";
-          return {
-            name: it.name,
-            value: `**${it.quantity}** disponibili${reservedPart}`,
-            inline: true,
-          };
-        })
-      );
       return embed;
     });
 
-    if (items.length > MAX_ITEMS) {
-      content = `⚠️ Mostrati solo i primi ${MAX_ITEMS} oggetti su ${items.length} (limite Discord: massimo ${FIELDS_PER_EMBED} campi per embed, ${MAX_EMBEDS_PER_MESSAGE} embed per messaggio).`;
+    if (chunks.length > MAX_EMBEDS_PER_MESSAGE) {
+      content = `⚠️ Inventario troppo grande per essere mostrato interamente (limite Discord: massimo ${MAX_EMBEDS_PER_MESSAGE} embed per messaggio).`;
     }
   }
 
