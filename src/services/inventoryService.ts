@@ -1,7 +1,9 @@
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { getConfig, listInventory, updateConfig } from "../db";
 
+const FIELDS_PER_EMBED = 25;
 const MAX_EMBEDS_PER_MESSAGE = 10;
+const MAX_ITEMS = FIELDS_PER_EMBED * MAX_EMBEDS_PER_MESSAGE;
 
 export async function refreshInventory(client: Client, guildId: string) {
   const cfg = getConfig(guildId);
@@ -20,19 +22,30 @@ export async function refreshInventory(client: Client, guildId: string) {
         .setColor(0x1abc9c),
     ];
   } else {
-    const shown = items.slice(0, MAX_EMBEDS_PER_MESSAGE);
-    embeds = shown.map((it) => {
-      const reservedPart = it.reserved > 0 ? ` (${it.reserved} in poll)` : "";
-      const embed = new EmbedBuilder()
-        .setTitle(it.name)
-        .setDescription(`**${it.quantity}** disponibili${reservedPart}`)
-        .setColor(0x1abc9c);
-      if (it.icon_url) embed.setThumbnail(it.icon_url);
+    const shown = items.slice(0, MAX_ITEMS);
+    const chunks: (typeof shown)[] = [];
+    for (let i = 0; i < shown.length; i += FIELDS_PER_EMBED) {
+      chunks.push(shown.slice(i, i + FIELDS_PER_EMBED));
+    }
+
+    embeds = chunks.map((chunk, idx) => {
+      const embed = new EmbedBuilder().setColor(0x1abc9c);
+      if (idx === 0) embed.setTitle("📦 Inventario di gilda");
+      embed.addFields(
+        chunk.map((it) => {
+          const reservedPart = it.reserved > 0 ? ` (${it.reserved} in poll)` : "";
+          return {
+            name: it.name,
+            value: `**${it.quantity}** disponibili${reservedPart}`,
+            inline: true,
+          };
+        })
+      );
       return embed;
     });
 
-    if (items.length > MAX_EMBEDS_PER_MESSAGE) {
-      content = `⚠️ Mostrati solo i primi ${MAX_EMBEDS_PER_MESSAGE} oggetti su ${items.length} (limite Discord: massimo 10 embed per messaggio).`;
+    if (items.length > MAX_ITEMS) {
+      content = `⚠️ Mostrati solo i primi ${MAX_ITEMS} oggetti su ${items.length} (limite Discord: massimo ${FIELDS_PER_EMBED} campi per embed, ${MAX_EMBEDS_PER_MESSAGE} embed per messaggio).`;
     }
   }
 
