@@ -18,7 +18,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const embed = new EmbedBuilder()
     .setTitle("📦 Preset oggetto salvati")
-    .setDescription(presets.map((p) => `• **${p.name}**`).join("\n"))
+    .setDescription(
+      presets
+        .map((p) => {
+          const points =
+            p.min_points !== null ? `${p.min_points} punti min.` : "punti min. default";
+          const duration =
+            p.duration_hours !== null ? `${p.duration_hours}h durata` : "durata default";
+          const icon = p.icon_url ? "🖼️" : "🚫 nessuna icona";
+          return `• **${p.name}** — ${points}, ${duration}, ${icon}`;
+        })
+        .join("\n")
+    )
     .setColor(0x9b59b6);
 
   await interaction.reply({ embeds: [embed], ephemeral: true });
