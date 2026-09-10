@@ -1,0 +1,27 @@
+{
+  "name": "ro-loot-bot",
+  "version": "1.0.0",
+  "description": "Bot Discord per la gestione punti e loot roll della gilda (Ragnarok Online Zero)",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "deploy-commands": "node dist/deploy-commands.js",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
