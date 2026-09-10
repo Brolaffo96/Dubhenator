@@ -5,9 +5,17 @@ import {
   SlashCommandBuilder,
   TextChannel,
 } from "discord.js";
-import { createPoll, getConfig, getPreset, searchPresets } from "../db";
+import {
+  createPoll,
+  getConfig,
+  getInventoryItem,
+  getPreset,
+  reserveStock,
+  searchPresets,
+} from "../db";
 import { isManager } from "../services/permissions";
 import { buildPollEmbed } from "../services/pollService";
+import { refreshInventory } from "../services/inventoryService";
 
 export const data = new SlashCommandBuilder()
   .setName("startpoll")
@@ -86,6 +94,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   let itemName = interaction.options.getString("oggetto");
   const attachment = interaction.options.getAttachment("icona");
   let iconUrl = attachment?.url ?? interaction.options.getString("icona_url");
+  let presetMinPoints: number | null = null;
+  let presetDurationHours: number | null = null;
 
   if (presetName) {
     const preset = getPreset(guildId, presetName);
@@ -98,6 +108,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
     itemName = preset.name;
     iconUrl = preset.icon_url;
+    presetMinPoints = preset.min_points;
+    presetDurationHours = preset.duration_hours;
   }
 
   if (!itemName) {
@@ -110,10 +122,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const qty = interaction.options.getInteger("quantita", true);
+  // Priorità: valore esplicito nel comando > valore salvato nel preset > default di gilda
   const minPoints =
-    interaction.options.getInteger("punti_minimi") ?? cfg.default_min_points;
+    interaction.options.getInteger("punti_minimi") ??
+    presetMinPoints ??
+    cfg.default_min_points;
   const durationHours =
-    interaction.options.getNumber("durata_ore") ?? cfg.default_duration_hours;
+    interaction.options.getNumber("durata_ore") ??
+    presetDurationHours ??
+    cfg.default_duration_hours;
 
   const channel = (await interaction.client.channels.fetch(
     cfg.loot_channel_id
@@ -125,6 +142,23 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       ephemeral: true,
     });
     return;
+  }
+
+  // Se esiste una voce di inventario con lo stesso nome, la poll vi si collega:
+  // la quantità viene "riservata" (tolta dal disponibile) finché la poll non si
+  // conclude (rilasciata se nessuno vince, tolta per sempre al riscatto del premio).
+  const inventoryItem = getInventoryItem(guildId, itemName);
+  let inventoryLinked = false;
+  if (inventoryItem) {
+    const reserved = reserveStock(guildId, itemName, qty);
+    if (!reserved) {
+      await interaction.reply({
+        content: `❌ Nell'inventario risultano solo **${inventoryItem.quantity}** ${itemName} disponibili (escluso quanto già in altre poll), non **${qty}**. Controlla \`/addstock\` o riduci la quantità.`,
+        ephemeral: true,
+      });
+      return;
+    }
+    inventoryLinked = true;
   }
 
   const endAt = Date.now() + durationHours * 60 * 60 * 1000;
@@ -156,10 +190,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     icon_url: iconUrl,
     min_points: minPoints,
     end_at: endAt,
+    inventory_linked: inventoryLinked,
   });
 
+  if (inventoryLinked) {
+    await refreshInventory(interaction.client, guildId);
+  }
+
   await interaction.reply({
-    content: `✅ Poll avviata in <#${channel.id}> per **${qty}x ${itemName}** (chiude tra ${durationHours}h, minimo ${minPoints} punti).`,
+    content: `✅ Poll avviata in <#${channel.id}> per **${qty}x ${itemName}** (chiude tra ${durationHours}h, minimo ${minPoints} punti).${
+      inventoryLinked ? " Quantità riservata dall'inventario." : ""
+    }`,
     ephemeral: true,
   });
 }

@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS config (
   leaderboard_channel_id TEXT,
   leaderboard_message_id TEXT,
   notify_role_id        TEXT,
+  inventory_channel_id  TEXT,
+  inventory_message_id  TEXT,
   default_min_points    INTEGER NOT NULL DEFAULT 1,
   default_duration_hours REAL NOT NULL DEFAULT 24,
   join_emoji            TEXT NOT NULL DEFAULT '✅',
@@ -26,23 +28,26 @@ CREATE TABLE IF NOT EXISTS config (
 );
 
 CREATE TABLE IF NOT EXISTS item_presets (
-  guild_id TEXT NOT NULL,
-  name     TEXT NOT NULL,
-  icon_url TEXT,
+  guild_id       TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  icon_url       TEXT,
+  min_points     INTEGER,
+  duration_hours REAL,
   PRIMARY KEY (guild_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS polls (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  guild_id     TEXT NOT NULL,
-  channel_id   TEXT NOT NULL,
-  message_id   TEXT NOT NULL,
-  item_name    TEXT NOT NULL,
-  item_qty     INTEGER NOT NULL,
-  icon_url     TEXT,
-  min_points   INTEGER NOT NULL,
-  end_at       INTEGER NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'active'
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id          TEXT NOT NULL,
+  channel_id        TEXT NOT NULL,
+  message_id        TEXT NOT NULL,
+  item_name         TEXT NOT NULL,
+  item_qty          INTEGER NOT NULL,
+  icon_url          TEXT,
+  min_points        INTEGER NOT NULL,
+  end_at            INTEGER NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'active',
+  inventory_linked  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS poll_participants (
@@ -58,6 +63,15 @@ CREATE TABLE IF NOT EXISTS winners (
   announce_message_id TEXT NOT NULL,
   redeemed             INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS inventory (
+  guild_id TEXT NOT NULL,
+  name     TEXT NOT NULL,
+  icon_url TEXT,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  reserved INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (guild_id, name)
+);
 `);
 
 // Migrazione leggera: aggiunge colonne mancanti a database creati con versioni precedenti dello schema,
@@ -71,6 +85,11 @@ function ensureColumn(table: string, column: string, definition: string) {
   }
 }
 ensureColumn("config", "notify_role_id", "TEXT");
+ensureColumn("config", "inventory_channel_id", "TEXT");
+ensureColumn("config", "inventory_message_id", "TEXT");
+ensureColumn("item_presets", "min_points", "INTEGER");
+ensureColumn("item_presets", "duration_hours", "REAL");
+ensureColumn("polls", "inventory_linked", "INTEGER NOT NULL DEFAULT 0");
 
 // ---------- Config ----------
 export interface GuildConfig {
@@ -80,6 +99,8 @@ export interface GuildConfig {
   leaderboard_channel_id: string | null;
   leaderboard_message_id: string | null;
   notify_role_id: string | null;
+  inventory_channel_id: string | null;
+  inventory_message_id: string | null;
   default_min_points: number;
   default_duration_hours: number;
   join_emoji: string;
@@ -105,6 +126,8 @@ const CONFIG_COLUMNS = [
   "leaderboard_channel_id",
   "leaderboard_message_id",
   "notify_role_id",
+  "inventory_channel_id",
+  "inventory_message_id",
   "default_min_points",
   "default_duration_hours",
   "join_emoji",
@@ -169,13 +192,18 @@ export interface PollRow {
   min_points: number;
   end_at: number;
   status: string;
+  inventory_linked: number;
 }
 
-export function createPoll(poll: Omit<PollRow, "id" | "status">): number {
+export function createPoll(
+  poll: Omit<PollRow, "id" | "status" | "inventory_linked"> & {
+    inventory_linked?: boolean;
+  }
+): number {
   const info = db
     .prepare(
-      `INSERT INTO polls (guild_id, channel_id, message_id, item_name, item_qty, icon_url, min_points, end_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO polls (guild_id, channel_id, message_id, item_name, item_qty, icon_url, min_points, end_at, inventory_linked)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       poll.guild_id,
@@ -185,9 +213,16 @@ export function createPoll(poll: Omit<PollRow, "id" | "status">): number {
       poll.item_qty,
       poll.icon_url,
       poll.min_points,
-      poll.end_at
+      poll.end_at,
+      poll.inventory_linked ? 1 : 0
     );
   return Number(info.lastInsertRowid);
+}
+
+export function getPollById(pollId: number): PollRow | undefined {
+  return db
+    .prepare("SELECT * FROM polls WHERE id = ?")
+    .get(pollId) as unknown as PollRow | undefined;
 }
 
 export function getPollByMessageId(messageId: string): PollRow | undefined {
@@ -201,6 +236,14 @@ export function getExpiredActivePolls(): PollRow[] {
   return db
     .prepare("SELECT * FROM polls WHERE status = 'active' AND end_at <= ?")
     .all(now) as unknown as PollRow[];
+}
+
+export function getActivePollsForGuild(guildId: string): PollRow[] {
+  return db
+    .prepare(
+      "SELECT * FROM polls WHERE guild_id = ? AND status = 'active' ORDER BY end_at ASC"
+    )
+    .all(guildId) as unknown as PollRow[];
 }
 
 export function setPollStatus(pollId: number, status: string) {
@@ -270,13 +313,24 @@ export interface ItemPreset {
   guild_id: string;
   name: string;
   icon_url: string | null;
+  min_points: number | null;
+  duration_hours: number | null;
 }
 
-export function upsertPreset(guildId: string, name: string, iconUrl: string | null) {
+export function upsertPreset(
+  guildId: string,
+  name: string,
+  iconUrl: string | null,
+  minPoints: number | null,
+  durationHours: number | null
+) {
   db.prepare(
-    `INSERT INTO item_presets (guild_id, name, icon_url) VALUES (?, ?, ?)
-     ON CONFLICT(guild_id, name) DO UPDATE SET icon_url = excluded.icon_url`
-  ).run(guildId, name, iconUrl);
+    `INSERT INTO item_presets (guild_id, name, icon_url, min_points, duration_hours) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(guild_id, name) DO UPDATE SET
+       icon_url = excluded.icon_url,
+       min_points = excluded.min_points,
+       duration_hours = excluded.duration_hours`
+  ).run(guildId, name, iconUrl, minPoints, durationHours);
 }
 
 export function deletePreset(guildId: string, name: string) {
@@ -304,4 +358,93 @@ export function searchPresets(guildId: string, query: string): ItemPreset[] {
       "SELECT * FROM item_presets WHERE guild_id = ? AND name LIKE ? ORDER BY name COLLATE NOCASE LIMIT 25"
     )
     .all(guildId, `%${query}%`) as unknown as ItemPreset[];
+}
+
+// ---------- Inventory ----------
+export interface InventoryItem {
+  guild_id: string;
+  name: string;
+  icon_url: string | null;
+  quantity: number;
+  reserved: number;
+}
+
+export function getInventoryItem(
+  guildId: string,
+  name: string
+): InventoryItem | undefined {
+  return db
+    .prepare(
+      "SELECT * FROM inventory WHERE guild_id = ? AND name = ? COLLATE NOCASE"
+    )
+    .get(guildId, name) as unknown as InventoryItem | undefined;
+}
+
+export function addStock(
+  guildId: string,
+  name: string,
+  qty: number,
+  iconUrl: string | null
+) {
+  const existing = getInventoryItem(guildId, name);
+  if (existing) {
+    db.prepare(
+      `UPDATE inventory SET quantity = quantity + ?, icon_url = COALESCE(?, icon_url)
+       WHERE guild_id = ? AND name = ?`
+    ).run(qty, iconUrl, guildId, existing.name);
+  } else {
+    db.prepare(
+      "INSERT INTO inventory (guild_id, name, icon_url, quantity, reserved) VALUES (?, ?, ?, ?, 0)"
+    ).run(guildId, name, iconUrl, qty);
+  }
+}
+
+/** Rimuove manualmente dalla quantità DISPONIBILE (non tocca quella riservata in poll). Ritorna false se non c'è abbastanza disponibile. */
+export function removeStock(guildId: string, name: string, qty: number): boolean {
+  const existing = getInventoryItem(guildId, name);
+  if (!existing || existing.quantity < qty) return false;
+  db.prepare(
+    "UPDATE inventory SET quantity = quantity - ? WHERE guild_id = ? AND name = ?"
+  ).run(qty, guildId, existing.name);
+  return true;
+}
+
+/** Sposta qty da disponibile a riservato (apertura poll collegata a un oggetto tracciato). Ritorna false se non c'è abbastanza disponibile. */
+export function reserveStock(guildId: string, name: string, qty: number): boolean {
+  const existing = getInventoryItem(guildId, name);
+  if (!existing || existing.quantity < qty) return false;
+  db.prepare(
+    "UPDATE inventory SET quantity = quantity - ?, reserved = reserved + ? WHERE guild_id = ? AND name = ?"
+  ).run(qty, qty, guildId, existing.name);
+  return true;
+}
+
+/** Rilascia qty da riservato a disponibile di nuovo (poll annullata o senza vincitore valido). */
+export function releaseStock(guildId: string, name: string, qty: number) {
+  db.prepare(
+    "UPDATE inventory SET quantity = quantity + ?, reserved = MAX(0, reserved - ?) WHERE guild_id = ? AND name = ? COLLATE NOCASE"
+  ).run(qty, qty, guildId, name);
+}
+
+/** Consuma definitivamente qty da riservato (premio ritirato in game, confermato dal riscatto). */
+export function consumeStock(guildId: string, name: string, qty: number) {
+  db.prepare(
+    "UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE guild_id = ? AND name = ? COLLATE NOCASE"
+  ).run(qty, guildId, name);
+}
+
+export function listInventory(guildId: string): InventoryItem[] {
+  return db
+    .prepare(
+      "SELECT * FROM inventory WHERE guild_id = ? AND (quantity > 0 OR reserved > 0) ORDER BY name COLLATE NOCASE"
+    )
+    .all(guildId) as unknown as InventoryItem[];
+}
+
+export function searchInventory(guildId: string, query: string): InventoryItem[] {
+  return db
+    .prepare(
+      "SELECT * FROM inventory WHERE guild_id = ? AND name LIKE ? ORDER BY name COLLATE NOCASE LIMIT 25"
+    )
+    .all(guildId, `%${query}%`) as unknown as InventoryItem[];
 }

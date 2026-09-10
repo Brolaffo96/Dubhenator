@@ -9,13 +9,16 @@ import {
 } from "discord.js";
 import {
   addParticipant,
+  consumeStock,
   getConfig,
   getPoints,
   getPollByMessageId,
+  getPollById,
   getWinnerByAnnounceMessageId,
   markRedeemed,
 } from "../db";
 import { isManager } from "../services/permissions";
+import { refreshInventory } from "../services/inventoryService";
 
 async function resolvePartials(
   reaction: MessageReaction | PartialMessageReaction,
@@ -96,6 +99,11 @@ export function registerReactionAdd(client: Client) {
         }
 
         markRedeemed(winner.poll_id);
+        const poll = getPollById(winner.poll_id);
+        if (poll?.inventory_linked) {
+          consumeStock(guildId, poll.item_name, poll.item_qty);
+          await refreshInventory(client, guildId);
+        }
         try {
           await message.delete();
         } catch {

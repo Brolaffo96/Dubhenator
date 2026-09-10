@@ -6,13 +6,26 @@ Bot Discord per gestire punti e assegnazione loot (roll pesato) nella gilda.
 
 - `/addpoints` — un manager assegna punti a più partecipanti dopo una run.
 - `/removepoints` — un manager toglie punti manualmente a uno o più utenti (casi eccezionali/correzioni).
-- `/startpoll` — un manager avvia una poll per un oggetto: gli utenti si iscrivono mettendo una reazione (✅ di default) sul messaggio, solo se hanno abbastanza punti (altrimenti la reazione viene rimossa e ricevono un DM). Il messaggio menziona (ping vero, non solo testo) il ruolo configurato con `/setnotifyrole`, se impostato.
-- `/addpreset`, `/removepreset` (con autocomplete), `/listpresets` — salva nome+icona di un oggetto una volta sola; in `/startpoll` poi basta scegliere il preset dal menu che compare mentre scrivi, senza dover ricopiare l'URL dell'icona ogni volta. Per l'icona puoi **allegare direttamente uno screenshot dal tuo PC** (campo `icona`), non serve un URL — se preferisci comunque un link diretto puoi usare `icona_url` in alternativa.
-- Allo scadere del timer, il bot estrae un vincitore con probabilità proporzionale ai punti **attuali** di ciascun iscritto, cancella il messaggio di iscrizione, pubblica l'annuncio del vincitore (con ping vero al vincitore, percentuali, elenco partecipanti, riepilogo premio) e detrae al vincitore i punti costo della poll.
-- Un manager reagisce con 🎁 sul messaggio del vincitore per archiviarlo (viene cancellato) una volta consegnato il premio.
+- `/startpoll` — un manager avvia una poll per un oggetto: gli utenti si iscrivono mettendo una reazione (✅ di default) sul messaggio, solo se hanno abbastanza punti (altrimenti la reazione viene rimossa e ricevono un DM). Il messaggio menziona (ping vero, non solo testo) il ruolo configurato con `/setnotifyrole`, se impostato. Se esiste un oggetto omonimo in inventario, la quantità viene riservata automaticamente (vedi sezione Inventario sotto).
+- `/cancelpoll` — annulla una poll attiva creata per errore (punti/durata/oggetto sbagliati): nessun vincitore, eventuale quantità riservata in inventario torna disponibile.
+- `/endpollnow` — chiude subito una poll ed estrae il vincitore, senza aspettare la scadenza naturale.
+- `/addpreset`, `/removepreset` (con autocomplete), `/listpresets` — salva nome, icona, **punti minimi e durata di default** di un oggetto una volta sola; in `/startpoll` poi basta scegliere il preset dal menu che compare mentre scrivi (icona/punti/durata si precompilano, sempre sovrascrivibili al momento se serve un'eccezione). Per l'icona puoi **allegare direttamente uno screenshot dal tuo PC**, non serve un URL.
+- `/addstock`, `/removestock` (con autocomplete) — gestiscono l'inventario di gilda (vedi sotto).
+- Allo scadere del timer, il bot estrae un vincitore con probabilità proporzionale ai punti **attuali** di ciascun iscritto — **ma solo tra chi, in quel preciso momento, ha ancora almeno i punti minimi richiesti**: se qualcuno li ha già spesi vincendo un'altra poll conclusa poco prima, viene escluso dall'estrazione invece di restare con una chance residua, così nessuno può mai vincere più di quanto i suoi punti coprano davvero. Il bot cancella il messaggio di iscrizione, pubblica l'annuncio del vincitore (con ping vero, percentuali, elenco partecipanti — e chi è stato escluso per punti insufficienti, se capita — riepilogo premio) e detrae al vincitore i punti costo della poll.
+- Un manager reagisce con 🎁 sul messaggio del vincitore per archiviarlo (viene cancellato) una volta consegnato il premio — se la poll era collegata all'inventario, la quantità viene tolta definitivamente in quel momento, non prima.
 - `/leaderboard` forza l'aggiornamento della classifica punti nel canale configurato (si aggiorna comunque automaticamente ad ogni variazione punti).
 - `/mypoints` per far controllare a chiunque i propri punti.
-- `/setmanagerrole`, `/setlootchannel`, `/setleaderboardchannel`, `/setnotifyrole`, `/setdefaults` per la configurazione (solo Amministratori del server).
+- `/setmanagerrole`, `/setlootchannel`, `/setleaderboardchannel`, `/setnotifyrole`, `/setinventorychannel`, `/setdefaults` per la configurazione (solo Amministratori del server).
+
+## Inventario di gilda
+
+Dato che il gioco non ha uno storage condiviso, il bot può tenere il conto di quanti materiali avete a disposizione:
+
+- `/addstock nome:"Shimmering Opal" quantita:10` — un manager registra quanto è stato droppato (se un preset omonimo esiste già, l'icona viene riusata in automatico).
+- Il pannello nel canale configurato con `/setinventorychannel` mostra sempre nome, icona, **quantità disponibile** e — se diversa da zero — **quanto è attualmente "in poll"** (riservato ma non ancora consegnato).
+- Quando fai `/startpoll` per un oggetto che esiste in inventario, la quantità richiesta viene **spostata automaticamente da "disponibile" a "in poll"** — non puoi mettere in palio più di quanto hai davvero. Se la poll non ha vincitore (nessun iscritto, o tutti scesi sotto la soglia punti) o viene annullata con `/cancelpoll`, la quantità **torna disponibile**. Solo quando un manager conferma la consegna reagendo con 🎁 al messaggio del vincitore, la quantità **sparisce per sempre** dall'inventario.
+- `/removestock nome quantita` toglie manualmente pezzi dal disponibile (es. dati via fuori dal bot, o correzioni) — è bloccato se provi a togliere più di quanto sia effettivamente disponibile (la parte già "in poll" non è toccabile da qui).
+- Se avvii una poll per un oggetto che **non** è tracciato in inventario, funziona come prima: nessun collegamento, nessun controllo di scorta — comodo per oggetti una tantum che non vuoi gestire come stock.
 
 Tutto è persistito in un singolo file `data.sqlite` (SQLite), niente database esterni da gestire.
 
@@ -72,6 +85,7 @@ Da amministratore del server, in qualsiasi canale:
 /setlootchannel canale:#loot-roll
 /setleaderboardchannel canale:#classifica-punti
 /setnotifyrole ruolo:@LootRoll
+/setinventorychannel canale:#inventario-gilda
 /setdefaults punti_minimi:1 durata_ore:24
 ```
 

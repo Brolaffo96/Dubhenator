@@ -5,11 +5,13 @@ import {
   getExpiredActivePolls,
   getParticipants,
   getPoints,
+  releaseStock,
   removePoints,
   saveWinner,
   setPollStatus,
 } from "../db";
 import { refreshLeaderboard } from "./leaderboardService";
+import { refreshInventory } from "./inventoryService";
 
 export function buildPollEmbed(poll: {
   item_name: string;
@@ -28,7 +30,7 @@ export function buildPollEmbed(poll: {
           poll.end_at / 1000
         )}:F>)`,
         "",
-        "Reagisci a questo messaggio per iscriverti. Le tue chance di vincere sono proporzionali ai punti che hai in classifica.",
+        "Reagisci a questo messaggio per iscriverti. Le tue chance di vincere sono proporzionali ai punti che hai in classifica al momento della chiusura — devi avere almeno i punti minimi anche in quel momento, non solo ora.",
       ].join("\n")
     )
     .setColor(0x3498db);
@@ -65,7 +67,36 @@ export async function checkAndEndPolls(client: Client) {
   }
 }
 
-async function endPoll(client: Client, poll: PollRow) {
+async function closeWithNoWinner(
+  client: Client,
+  poll: PollRow,
+  channel: TextChannel | null,
+  reason: string
+) {
+  setPollStatus(poll.id, "ended");
+  if (poll.inventory_linked) {
+    releaseStock(poll.guild_id, poll.item_name, poll.item_qty);
+    await refreshInventory(client, poll.guild_id);
+  }
+  if (channel) {
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`🎁 Loot roll chiuso: ${poll.item_name}`)
+          .setDescription(reason)
+          .setColor(0x95a5a6),
+      ],
+    });
+  }
+}
+
+/**
+ * Chiude una poll (per scadenza naturale o forzata manualmente) ed estrae il vincitore.
+ * Esclude dall'estrazione chi, AL MOMENTO DELLA CHIUSURA, non ha più almeno i punti minimi
+ * richiesti (es. li ha già spesi vincendo un'altra poll conclusa poco prima) — evita che
+ * qualcuno possa "vincere" più premi di quanti i suoi punti coprano davvero.
+ */
+export async function endPoll(client: Client, poll: PollRow) {
   try {
     const channel = (await client.channels.fetch(
       poll.channel_id
@@ -84,28 +115,36 @@ async function endPoll(client: Client, poll: PollRow) {
     }
 
     if (participantIds.length === 0) {
-      setPollStatus(poll.id, "ended");
-      if (channel) {
-        await channel.send({
-          embeds: [
-            new EmbedBuilder()
-              .setTitle(`🎁 Loot roll chiuso: ${poll.item_name}`)
-              .setDescription("Nessun partecipante si è iscritto: nessun vincitore.")
-              .setColor(0x95a5a6),
-          ],
-        });
-      }
+      await closeWithNoWinner(
+        client,
+        poll,
+        channel,
+        "Nessun partecipante si è iscritto: nessun vincitore."
+      );
       return;
     }
 
     // IMPORTANTE: punti attuali, presi ORA (possono essere cambiati da altre poll concluse nel frattempo)
-    const weights = participantIds.map((userId) => ({
+    const allWeights = participantIds.map((userId) => ({
       userId,
       points: getPoints(poll.guild_id, userId),
     }));
 
-    const winner = weightedPick(weights);
-    const total = weights.reduce((s, w) => s + w.points, 0);
+    // Solo chi ha ancora almeno il minimo richiesto può essere estratto
+    const eligible = allWeights.filter((w) => w.points >= poll.min_points);
+
+    if (eligible.length === 0) {
+      await closeWithNoWinner(
+        client,
+        poll,
+        channel,
+        "Nessuno degli iscritti aveva più punti sufficienti al momento della chiusura (probabilmente spesi vincendo altre poll nel frattempo): nessun vincitore."
+      );
+      return;
+    }
+
+    const winner = weightedPick(eligible);
+    const total = eligible.reduce((s, w) => s + w.points, 0);
 
     // Sottrae al vincitore i punti "costo" della poll (non scende sotto 0)
     removePoints(poll.guild_id, winner.userId, poll.min_points);
@@ -113,13 +152,20 @@ async function endPoll(client: Client, poll: PollRow) {
     setPollStatus(poll.id, "ended");
 
     if (channel) {
-      const participantsDesc = weights
+      const participantsDesc = eligible
         .map((w) => {
-          const pct = total > 0 ? ((w.points / total) * 100).toFixed(1) : (100 / weights.length).toFixed(1);
+          const pct =
+            total > 0
+              ? ((w.points / total) * 100).toFixed(1)
+              : (100 / eligible.length).toFixed(1);
           const crown = w.userId === winner.userId ? " 👑" : "";
           return `<@${w.userId}> — ${w.points} punti (${pct}%)${crown}`;
         })
         .join("\n");
+
+      const excludedIds = allWeights
+        .filter((w) => w.points < poll.min_points)
+        .map((w) => w.userId);
 
       const announceEmbed = new EmbedBuilder()
         .setTitle(`🎉 Vincitore: ${poll.item_name}`)
@@ -130,6 +176,14 @@ async function endPoll(client: Client, poll: PollRow) {
             "",
             "**Partecipanti e chance:**",
             participantsDesc,
+            ...(excludedIds.length > 0
+              ? [
+                  "",
+                  `*Esclusi per punti insufficienti al momento della chiusura: ${excludedIds
+                    .map((id) => `<@${id}>`)
+                    .join(", ")}*`,
+                ]
+              : []),
             "",
             `Un manager deve reagire con l'emoji sotto quando il premio è stato consegnato, per archiviare questo messaggio.`,
           ].join("\n")
@@ -149,10 +203,39 @@ async function endPoll(client: Client, poll: PollRow) {
       await announceMsg.react(cfg.redeem_emoji);
 
       saveWinner(poll.id, winner.userId, channel.id, announceMsg.id);
+      // Nota: se la poll era collegata all'inventario, la quantità resta "riservata"
+      // finché un manager non conferma la consegna con l'emoji di riscatto — a quel
+      // punto viene tolta definitivamente (vedi reactionAdd.ts).
     }
 
     await refreshLeaderboard(client, poll.guild_id);
   } catch (err) {
     console.error(`Errore chiudendo la poll ${poll.id}:`, err);
+  }
+}
+
+/**
+ * Annulla una poll attiva manualmente (es. creata per errore): nessun vincitore,
+ * il messaggio di iscrizione viene cancellato ed eventuale scorta riservata torna disponibile.
+ */
+export async function cancelPoll(client: Client, poll: PollRow) {
+  const channel = (await client.channels
+    .fetch(poll.channel_id)
+    .catch(() => null)) as TextChannel | null;
+
+  if (channel) {
+    try {
+      const regMsg = await channel.messages.fetch(poll.message_id);
+      await regMsg.delete();
+    } catch {
+      /* già cancellato o non trovato, ignora */
+    }
+  }
+
+  setPollStatus(poll.id, "cancelled");
+
+  if (poll.inventory_linked) {
+    releaseStock(poll.guild_id, poll.item_name, poll.item_qty);
+    await refreshInventory(client, poll.guild_id);
   }
 }

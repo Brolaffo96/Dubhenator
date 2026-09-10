@@ -1,11 +1,11 @@
 import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder } from "discord.js";
-import { upsertPreset } from "../db";
+import { getPreset, upsertPreset } from "../db";
 import { isManager } from "../services/permissions";
 
 export const data = new SlashCommandBuilder()
   .setName("addpreset")
   .setDescription(
-    "Salva (o aggiorna) un preset oggetto con nome e icona, da riusare in /startpoll (solo manager)"
+    "Salva/aggiorna un preset oggetto: nome, icona, punti e durata (solo manager)"
   )
   .addStringOption((opt) =>
     opt
@@ -23,6 +23,18 @@ export const data = new SlashCommandBuilder()
     opt
       .setName("icona_url")
       .setDescription("In alternativa: URL diretto dell'immagine, se non carichi un file")
+  )
+  .addIntegerOption((opt) =>
+    opt
+      .setName("punti_minimi")
+      .setDescription("Punti minimi di default per questo oggetto (sovrascrivibile in /startpoll)")
+      .setMinValue(0)
+  )
+  .addNumberOption((opt) =>
+    opt
+      .setName("durata_ore")
+      .setDescription("Durata di default in ore per questo oggetto (sovrascrivibile in /startpoll)")
+      .setMinValue(0.1)
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -35,9 +47,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  const guildId = interaction.guildId!;
   const name = interaction.options.getString("nome", true).trim();
   const attachment = interaction.options.getAttachment("icona");
   const iconUrlOption = interaction.options.getString("icona_url");
+  const minPointsOption = interaction.options.getInteger("punti_minimi");
+  const durationHoursOption = interaction.options.getNumber("durata_ore");
 
   if (attachment && !attachment.contentType?.startsWith("image/")) {
     await interaction.reply({
@@ -47,13 +62,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const iconUrl = attachment?.url ?? iconUrlOption?.trim() ?? null;
+  // Se il preset esiste già e questo comando non specifica un campo, mantieni il valore
+  // precedente invece di azzerarlo (utile per aggiornare solo l'icona senza toccare il resto).
+  const existing = getPreset(guildId, name);
+  const iconUrl = attachment?.url ?? iconUrlOption?.trim() ?? existing?.icon_url ?? null;
+  const minPoints = minPointsOption ?? existing?.min_points ?? null;
+  const durationHours = durationHoursOption ?? existing?.duration_hours ?? null;
 
-  upsertPreset(interaction.guildId!, name, iconUrl);
+  upsertPreset(guildId, name, iconUrl, minPoints, durationHours);
+
+  const details = [
+    iconUrl ? null : "senza icona",
+    minPoints !== null ? `punti minimi ${minPoints}` : null,
+    durationHours !== null ? `durata ${durationHours}h` : null,
+  ].filter(Boolean);
 
   await interaction.reply({
     content: `✅ Preset **${name}** salvato${
-      iconUrl ? "" : " (senza icona)"
+      details.length ? ` (${details.join(", ")})` : ""
     }. Ora puoi usarlo in \`/startpoll\` selezionandolo dal campo "preset".`,
     ephemeral: true,
   });
