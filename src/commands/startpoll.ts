@@ -36,7 +36,7 @@ export const data = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt
       .setName("oggetto")
-      .setDescription("Nome dell'oggetto (obbligatorio solo se non usi un preset)")
+      .setDescription("Nome libero, NON collegato all'inventario (usa 'preset' per oggetti tracciati)")
   )
   .addAttachmentOption((opt) =>
     opt
@@ -144,10 +144,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  // Se esiste una voce di inventario con lo stesso nome, la poll vi si collega:
-  // la quantità viene "riservata" (tolta dal disponibile) finché la poll non si
-  // conclude (rilasciata se nessuno vince, tolta per sempre al riscatto del premio).
-  const inventoryItem = getInventoryItem(guildId, itemName);
+  // Collega la poll all'inventario SOLO se è stato scelto un preset (mai col campo
+  // libero "oggetto"): così il nome usato per riservare/consumare lo stock è sempre
+  // esattamente quello salvato nel preset, senza rischio di typo che creino doppioni.
+  const inventoryItem = presetName ? getInventoryItem(guildId, itemName) : undefined;
   let inventoryLinked = false;
   if (inventoryItem) {
     const reserved = reserveStock(guildId, itemName, qty);

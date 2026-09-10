@@ -1,17 +1,22 @@
-import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder } from "discord.js";
-import { addStock, getInventoryItem, getPreset } from "../db";
+import {
+  AutocompleteInteraction,
+  ChatInputCommandInteraction,
+  GuildMember,
+  SlashCommandBuilder,
+} from "discord.js";
+import { addStock, getPreset, searchPresets } from "../db";
 import { isManager } from "../services/permissions";
 import { refreshInventory } from "../services/inventoryService";
 
 export const data = new SlashCommandBuilder()
   .setName("addstock")
-  .setDescription("Aggiunge materiali/oggetti all'inventario di gilda (solo manager)")
+  .setDescription("Aggiunge materiali all'inventario di gilda (solo manager)")
   .addStringOption((opt) =>
     opt
-      .setName("nome")
-      .setDescription("Nome dell'oggetto (usa lo stesso nome del preset se ne hai uno)")
+      .setName("preset")
+      .setDescription("Scegli l'oggetto tra i preset salvati (crealo prima con /addpreset se manca)")
       .setRequired(true)
-      .setMaxLength(100)
+      .setAutocomplete(true)
   )
   .addIntegerOption((opt) =>
     opt
@@ -19,15 +24,15 @@ export const data = new SlashCommandBuilder()
       .setDescription("Quanti pezzi aggiungere")
       .setRequired(true)
       .setMinValue(1)
-  )
-  .addAttachmentOption((opt) =>
-    opt.setName("icona").setDescription("Carica un'immagine/screenshot dal tuo PC")
-  )
-  .addStringOption((opt) =>
-    opt
-      .setName("icona_url")
-      .setDescription("In alternativa: URL diretto dell'immagine")
   );
+
+export async function autocomplete(interaction: AutocompleteInteraction) {
+  const focused = interaction.options.getFocused();
+  const results = searchPresets(interaction.guildId!, focused);
+  await interaction.respond(
+    results.map((p) => ({ name: p.name, value: p.name }))
+  );
+}
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.member as GuildMember;
@@ -40,31 +45,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const guildId = interaction.guildId!;
-  const name = interaction.options.getString("nome", true).trim();
+  const presetName = interaction.options.getString("preset", true);
   const qty = interaction.options.getInteger("quantita", true);
-  const attachment = interaction.options.getAttachment("icona");
-  const iconUrlOption = interaction.options.getString("icona_url");
 
-  if (attachment && !attachment.contentType?.startsWith("image/")) {
+  // Requisito fondamentale: l'inventario può contenere SOLO oggetti già salvati come preset.
+  // Così il nome che finisce in inventario è sempre identico, byte per byte, a quello che
+  // /startpoll userà per collegare le poll allo stock — niente più "Mithril Ore" vs
+  // "Mithrilore" trattati come due oggetti diversi per un errore di battitura.
+  const preset = getPreset(guildId, presetName);
+  if (!preset) {
     await interaction.reply({
-      content: "❌ Il file allegato non sembra un'immagine.",
+      content: `❌ Non trovo un preset chiamato **${presetName}**. Crealo prima con \`/addpreset nome:"${presetName}" icona:...\`, poi riprova — così eviti che typo diversi creino voci di inventario separate per lo stesso oggetto.`,
       ephemeral: true,
     });
     return;
   }
 
-  // Se non viene fornita un'icona e l'oggetto esiste già in inventario, mantiene quella attuale.
-  // Se è la prima volta e non viene fornita nessuna icona, riusa quella di un preset omonimo, se esiste.
-  const existing = getInventoryItem(guildId, name);
-  const preset = existing ? null : getPreset(guildId, name);
-  const iconUrl =
-    attachment?.url ?? iconUrlOption?.trim() ?? existing?.icon_url ?? preset?.icon_url ?? null;
-
-  addStock(guildId, name, qty, iconUrl);
+  // Usiamo sempre il nome ESATTO salvato nel preset (non quello digitato dall'utente),
+  // così eventuali differenze di maiuscole/spazi non creano comunque doppioni.
+  addStock(guildId, preset.name, qty, preset.icon_url);
   await refreshInventory(interaction.client, guildId);
 
   await interaction.reply({
-    content: `✅ Aggiunti **${qty}x ${name}** all'inventario.`,
+    content: `✅ Aggiunti **${qty}x ${preset.name}** all'inventario.`,
     ephemeral: true,
   });
 }
