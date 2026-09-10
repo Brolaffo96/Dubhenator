@@ -60,5 +60,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     content: `✅ Aggiunti **${amount}** punti a: ${uniqueIds
       .map((id) => `<@${id}>`)
       .join(", ")}`,
+    // Mostra i tag come testo/link ma senza generare una notifica agli utenti citati.
+    allowedMentions: { users: [] },
   });
 }
