@@ -16,6 +16,7 @@ import {
 import { isManager } from "../services/permissions";
 import { buildPollEmbed } from "../services/pollService";
 import { refreshInventory } from "../services/inventoryService";
+import { downloadIcon } from "../services/iconStorage";
 
 export const data = new SlashCommandBuilder()
   .setName("startpoll")
@@ -93,7 +94,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const presetName = interaction.options.getString("preset");
   let itemName = interaction.options.getString("oggetto");
   const attachment = interaction.options.getAttachment("icona");
-  let iconUrl = attachment?.url ?? interaction.options.getString("icona_url");
+  let iconUrl: string | null = interaction.options.getString("icona_url");
   let presetMinPoints: number | null = null;
   let presetDurationHours: number | null = null;
 
@@ -119,6 +120,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       ephemeral: true,
     });
     return;
+  }
+
+  // Solo per poll una tantum (senza preset): scarichiamo subito l'allegato invece di
+  // salvare l'URL Discord, che ha una firma con scadenza e smetterebbe di funzionare
+  // prima che la poll si chiuda.
+  if (!presetName && attachment) {
+    try {
+      iconUrl = await downloadIcon(attachment.url, guildId, itemName);
+    } catch (err) {
+      console.error("Errore scaricando l'icona della poll:", err);
+      await interaction.reply({
+        content: "❌ Non sono riuscito a scaricare l'icona allegata. Riprova.",
+        ephemeral: true,
+      });
+      return;
+    }
   }
 
   const qty = interaction.options.getInteger("quantita", true);
@@ -162,7 +179,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const endAt = Date.now() + durationHours * 60 * 60 * 1000;
-  const embed = buildPollEmbed({
+  const { embed, file } = buildPollEmbed({
     item_name: itemName,
     item_qty: qty,
     icon_url: iconUrl,
@@ -177,6 +194,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const msg = await channel.send({
     content: pingContent,
     embeds: [embed],
+    files: file ? [file] : [],
     allowedMentions: { roles: cfg.notify_role_id ? [cfg.notify_role_id] : [] },
   });
   await msg.react(cfg.join_emoji);

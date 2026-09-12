@@ -12,6 +12,7 @@ import {
 } from "../db";
 import { refreshLeaderboard } from "./leaderboardService";
 import { refreshInventory } from "./inventoryService";
+import { resolveIconForEmbed } from "./iconStorage";
 
 export function buildPollEmbed(poll: {
   item_name: string;
@@ -35,8 +36,9 @@ export function buildPollEmbed(poll: {
     )
     .setColor(0x3498db);
 
-  if (poll.icon_url) embed.setThumbnail(poll.icon_url);
-  return embed;
+  const { thumbnail, file } = resolveIconForEmbed(poll.icon_url);
+  if (thumbnail) embed.setThumbnail(thumbnail);
+  return { embed, file };
 }
 
 /**
@@ -190,13 +192,15 @@ export async function endPoll(client: Client, poll: PollRow) {
         )
         .setColor(0x2ecc71);
 
-      if (poll.icon_url) announceEmbed.setThumbnail(poll.icon_url);
+      const { thumbnail, file } = resolveIconForEmbed(poll.icon_url);
+      if (thumbnail) announceEmbed.setThumbnail(thumbnail);
 
       // Il mention del vincitore va nel "content", fuori dall'embed: i mention dentro
       // un embed non generano notifica/ping, solo un link cliccabile senza avviso.
       const announceMsg = await channel.send({
         content: `🎉 <@${winner.userId}>`,
         embeds: [announceEmbed],
+        files: file ? [file] : [],
         allowedMentions: { users: [winner.userId] },
       });
       const cfg = getConfig(poll.guild_id);

@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder } from "discord.js";
 import { getPreset, upsertPreset } from "../db";
 import { isManager } from "../services/permissions";
+import { deleteIconIfLocal, downloadIcon } from "../services/iconStorage";
 
 export const data = new SlashCommandBuilder()
   .setName("addpreset")
@@ -65,7 +66,31 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // Se il preset esiste già e questo comando non specifica un campo, mantieni il valore
   // precedente invece di azzerarlo (utile per aggiornare solo l'icona senza toccare il resto).
   const existing = getPreset(guildId, name);
-  const iconUrl = attachment?.url ?? iconUrlOption?.trim() ?? existing?.icon_url ?? null;
+
+  let iconUrl: string | null;
+  if (attachment) {
+    // Scarichiamo subito il file: l'URL che Discord dà per un allegato ha una firma
+    // con scadenza, non può essere salvato così com'è nel database a lungo termine.
+    try {
+      iconUrl = await downloadIcon(attachment.url, guildId, name);
+    } catch (err) {
+      console.error("Errore scaricando l'icona del preset:", err);
+      await interaction.reply({
+        content: "❌ Non sono riuscito a scaricare l'icona allegata. Riprova.",
+        ephemeral: true,
+      });
+      return;
+    }
+  } else {
+    iconUrl = iconUrlOption?.trim() ?? existing?.icon_url ?? null;
+  }
+
+  // Se stiamo sostituendo un'icona locale precedente con una diversa, elimina il file
+  // vecchio per non accumulare file orfani sul disco.
+  if (existing?.icon_url && existing.icon_url !== iconUrl) {
+    deleteIconIfLocal(existing.icon_url);
+  }
+
   const minPoints = minPointsOption ?? existing?.min_points ?? null;
   const durationHours = durationHoursOption ?? existing?.duration_hours ?? null;
 

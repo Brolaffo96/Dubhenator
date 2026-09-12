@@ -4,8 +4,9 @@ import {
   GuildMember,
   SlashCommandBuilder,
 } from "discord.js";
-import { deletePreset, searchPresets } from "../db";
+import { deletePreset, getPreset, searchPresets } from "../db";
 import { isManager } from "../services/permissions";
+import { deleteIconIfLocal } from "../services/iconStorage";
 
 export const data = new SlashCommandBuilder()
   .setName("removepreset")
@@ -37,7 +38,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const name = interaction.options.getString("nome", true);
+  const existing = getPreset(interaction.guildId!, name);
   deletePreset(interaction.guildId!, name);
+  deleteIconIfLocal(existing?.icon_url);
 
   await interaction.reply({
     content: `✅ Preset **${name}** eliminato (se esisteva).`,
