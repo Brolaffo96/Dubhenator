@@ -75,7 +75,7 @@ migrazioni additive dello schema (mai distruttive) tramite `ensureColumn()` in
   li ha già spesi vincendo un'altra poll chiusa poco prima) viene **escluso**
   dall'estrazione, non solo penalizzato. Questo previene per costruzione doppie
   vincite e punti negativi, anche con più poll attive in contemporanea.
-- **Preset** (`/addpreset`): unica fonte di verità per nome/icona/punti
+- **Preset** (`/addpreset`, `/editpreset`): unica fonte di verità per nome/icona/punti
   minimi/durata di default di un oggetto. **L'inventario può essere popolato solo
   scegliendo un preset esistente** (mai testo libero) apposta per evitare che typo
   diversi (es. "Mithril Ore" vs "Mithrilore") creino doppioni scollegati
@@ -90,11 +90,11 @@ migrazioni additive dello schema (mai distruttive) tramite `ensureColumn()` in
   riscatto del premio (reazione 🎁 di un manager sul messaggio vincitore) = consume
   definitivo.
 
-## Comandi disponibili (18)
+## Comandi disponibili (19)
 
 Punti: `/addpoints` `/removepoints` `/mypoints` `/leaderboard`
 Poll: `/startpoll` `/cancelpoll` `/endpollnow`
-Preset: `/addpreset` `/removepreset` `/listpresets`
+Preset: `/addpreset` `/editpreset` `/removepreset` `/listpresets`
 Inventario: `/addstock` `/removestock` `/refreshinventory`
 Config (solo Administrator): `/setmanagerrole` `/setlootchannel`
 `/setleaderboardchannel` `/setnotifyrole` `/setinventorychannel` `/setdefaults`

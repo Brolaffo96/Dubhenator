@@ -9,7 +9,7 @@ Bot Discord per gestire punti e assegnazione loot (roll pesato) nella gilda.
 - `/startpoll` — un manager avvia una poll per un oggetto: gli utenti si iscrivono mettendo una reazione (✅ di default) sul messaggio, solo se hanno abbastanza punti (altrimenti la reazione viene rimossa e ricevono un DM). Il messaggio menziona (ping vero, non solo testo) il ruolo configurato con `/setnotifyrole`, se impostato. Se esiste un oggetto omonimo in inventario, la quantità viene riservata automaticamente (vedi sezione Inventario sotto).
 - `/cancelpoll` — annulla una poll attiva creata per errore (punti/durata/oggetto sbagliati): nessun vincitore, eventuale quantità riservata in inventario torna disponibile.
 - `/endpollnow` — chiude subito una poll ed estrae il vincitore, senza aspettare la scadenza naturale.
-- `/addpreset`, `/removepreset` (con autocomplete), `/listpresets` — salva nome, icona, **punti minimi e durata di default** di un oggetto una volta sola; in `/startpoll` poi basta scegliere il preset dal menu che compare mentre scrivi (icona/punti/durata si precompilano, sempre sovrascrivibili al momento se serve un'eccezione). Per l'icona puoi **allegare direttamente uno screenshot dal tuo PC**, non serve un URL.
+- `/addpreset`, `/editpreset`, `/removepreset` (con autocomplete), `/listpresets` — salva nome, icona, **punti minimi e durata di default** di un oggetto una volta sola; in `/startpoll` poi basta scegliere il preset dal menu che compare mentre scrivi (icona/punti/durata si precompilano, sempre sovrascrivibili al momento se serve un'eccezione). Per l'icona puoi **allegare direttamente uno screenshot dal tuo PC**, non serve un URL. `/addpreset` con lo stesso nome di un preset esistente lo aggiorna invece di duplicarlo (funziona anche se scrivi il nome con maiuscole/minuscole diverse); `/editpreset` fa la stessa cosa ma ti fa scegliere il preset da un menu — usalo quando vuoi essere sicuro di modificare quello giusto senza rischiare di crearne uno nuovo per un nome scritto leggermente diverso.
 - `/addstock`, `/removestock` (con autocomplete) — gestiscono l'inventario di gilda (vedi sotto).
 - Allo scadere del timer, il bot estrae un vincitore con probabilità proporzionale ai punti **attuali** di ciascun iscritto — **ma solo tra chi, in quel preciso momento, ha ancora almeno i punti minimi richiesti**: se qualcuno li ha già spesi vincendo un'altra poll conclusa poco prima, viene escluso dall'estrazione invece di restare con una chance residua, così nessuno può mai vincere più di quanto i suoi punti coprano davvero. Il bot cancella il messaggio di iscrizione, pubblica l'annuncio del vincitore (con ping vero, percentuali, elenco partecipanti — e chi è stato escluso per punti insufficienti, se capita — riepilogo premio) e detrae al vincitore i punti costo della poll.
 - Un manager reagisce con 🎁 sul messaggio del vincitore per archiviarlo (viene cancellato) una volta consegnato il premio — se la poll era collegata all'inventario, la quantità viene tolta definitivamente in quel momento, non prima.
@@ -90,7 +90,7 @@ Da amministratore del server, in qualsiasi canale:
 /setdefaults punti_minimi:1 durata_ore:24
 ```
 
-Da qui in poi, chiunque abbia il ruolo `@Manager` (o sia Administrator) può usare `/addpoints`, `/removepoints`, `/startpoll`, `/addpreset`, `/removepreset`.
+Da qui in poi, chiunque abbia il ruolo `@Manager` (o sia Administrator) può usare `/addpoints`, `/removepoints`, `/startpoll`, `/addpreset`, `/editpreset`, `/removepreset`.
 
 ## 4. Flusso d'uso tipico
 

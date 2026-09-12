@@ -334,15 +334,19 @@ export function upsertPreset(
 }
 
 export function deletePreset(guildId: string, name: string) {
-  db.prepare("DELETE FROM item_presets WHERE guild_id = ? AND name = ?").run(
-    guildId,
-    name
-  );
+  db.prepare(
+    "DELETE FROM item_presets WHERE guild_id = ? AND name = ? COLLATE NOCASE"
+  ).run(guildId, name);
 }
 
+// COLLATE NOCASE qui è importante: evita che un manager che digita un nome con
+// maiuscole/minuscole leggermente diverse (es. "Mithril ore" invece di "Mithril Ore")
+// crei per sbaglio un preset duplicato invece di aggiornare quello esistente.
 export function getPreset(guildId: string, name: string): ItemPreset | undefined {
   return db
-    .prepare("SELECT * FROM item_presets WHERE guild_id = ? AND name = ?")
+    .prepare(
+      "SELECT * FROM item_presets WHERE guild_id = ? AND name = ? COLLATE NOCASE"
+    )
     .get(guildId, name) as unknown as ItemPreset | undefined;
 }
 

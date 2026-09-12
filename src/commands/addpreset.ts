@@ -1,7 +1,7 @@
 import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder } from "discord.js";
-import { getPreset, upsertPreset } from "../db";
+import { getPreset } from "../db";
 import { isManager } from "../services/permissions";
-import { deleteIconIfLocal, downloadIcon } from "../services/iconStorage";
+import { applyPresetFields } from "../services/presetService";
 
 export const data = new SlashCommandBuilder()
   .setName("addpreset")
@@ -49,61 +49,25 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const guildId = interaction.guildId!;
-  const name = interaction.options.getString("nome", true).trim();
-  const attachment = interaction.options.getAttachment("icona");
-  const iconUrlOption = interaction.options.getString("icona_url");
-  const minPointsOption = interaction.options.getInteger("punti_minimi");
-  const durationHoursOption = interaction.options.getNumber("durata_ore");
+  const typedName = interaction.options.getString("nome", true).trim();
 
-  if (attachment && !attachment.contentType?.startsWith("image/")) {
-    await interaction.reply({
-      content: "❌ Il file allegato non sembra un'immagine.",
-      ephemeral: true,
-    });
-    return;
-  }
+  // Ricerca case-insensitive: se esiste già un preset scritto con maiuscole/minuscole
+  // diverse (es. "Mithril ore" invece di "Mithril Ore"), aggiorniamo quello invece di
+  // crearne uno nuovo per errore di battitura.
+  const existing = getPreset(guildId, typedName);
+  const targetName = existing?.name ?? typedName;
 
-  // Se il preset esiste già e questo comando non specifica un campo, mantieni il valore
-  // precedente invece di azzerarlo (utile per aggiornare solo l'icona senza toccare il resto).
-  const existing = getPreset(guildId, name);
-
-  let iconUrl: string | null;
-  if (attachment) {
-    // Scarichiamo subito il file: l'URL che Discord dà per un allegato ha una firma
-    // con scadenza, non può essere salvato così com'è nel database a lungo termine.
-    try {
-      iconUrl = await downloadIcon(attachment.url, guildId, name);
-    } catch (err) {
-      console.error("Errore scaricando l'icona del preset:", err);
-      await interaction.reply({
-        content: "❌ Non sono riuscito a scaricare l'icona allegata. Riprova.",
-        ephemeral: true,
-      });
-      return;
-    }
-  } else {
-    iconUrl = iconUrlOption?.trim() ?? existing?.icon_url ?? null;
-  }
-
-  // Se stiamo sostituendo un'icona locale precedente con una diversa, elimina il file
-  // vecchio per non accumulare file orfani sul disco.
-  if (existing?.icon_url && existing.icon_url !== iconUrl) {
-    deleteIconIfLocal(existing.icon_url);
-  }
-
-  const minPoints = minPointsOption ?? existing?.min_points ?? null;
-  const durationHours = durationHoursOption ?? existing?.duration_hours ?? null;
-
-  upsertPreset(guildId, name, iconUrl, minPoints, durationHours);
+  const result = await applyPresetFields(interaction, guildId, targetName, existing);
+  if (!result) return; // errore già inviato da applyPresetFields
 
   const details = [
-    iconUrl ? null : "senza icona",
-    minPoints !== null ? `punti minimi ${minPoints}` : null,
-    durationHours !== null ? `durata ${durationHours}h` : null,
+    result.iconUrl ? null : "senza icona",
+    result.minPoints !== null ? `punti minimi ${result.minPoints}` : null,
+    result.durationHours !== null ? `durata ${result.durationHours}h` : null,
   ].filter(Boolean);
 
   await interaction.reply({
-    content: `✅ Preset **${name}** salvato${
+    content: `✅ Preset **${targetName}** salvato${
       details.length ? ` (${details.join(", ")})` : ""
     }. Ora puoi usarlo in \`/startpoll\` selezionandolo dal campo "preset".`,
     ephemeral: true,
